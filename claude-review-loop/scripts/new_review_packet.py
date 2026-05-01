@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
 
 DEFAULT_BASE = Path.cwd() / "review_packets"
+DEFAULT_TARGET = os.environ.get("CC_COLLAB_DEFAULT_TARGET", "agent_claude:0.0")
 SESSION_CONFIG_PATH = Path.home() / ".codex_claude_skill_session.json"
 
 
@@ -22,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-id", required=True, help="Stable task id, used as packet directory name.")
     parser.add_argument("--summary", default="", help="Short task summary.")
     parser.add_argument("--base-dir", default=str(DEFAULT_BASE), help="Base output directory for review packets.")
-    parser.add_argument("--claude-target", default="agent_claude:0.0", help="Preferred Claude tmux target.")
+    parser.add_argument("--claude-target", default=DEFAULT_TARGET, help="Preferred Claude tmux target.")
     parser.add_argument("--resume-session", default="", help="Claude session name to resume.")
     return parser.parse_args()
 
@@ -63,24 +65,24 @@ def main() -> int:
                     "",
                     "## Context",
                     "",
-                    "- 当前任务：",
-                    "- 目标：",
-                    "- 本轮范围：",
+                    "- Current task:",
+                    "- Goal:",
+                    "- Scope for this round:",
                     "",
                     "## Code Changes",
                     "",
-                    "- 改动文件：",
-                    "- 关键变更：",
+                    "- Changed files:",
+                    "- Key changes:",
                     "",
                     "## Validation",
                     "",
-                    "- 已执行验证：",
-                    "- 结果：",
+                    "- Validation performed:",
+                    "- Result:",
                     "",
                     "## Review Focus",
                     "",
-                    "- 请重点检查：",
-                    "- 你认为最可能的回归点：",
+                    "- Please focus on:",
+                    "- Most likely regression points:",
                     "",
                     "## Open Risks",
                     "",

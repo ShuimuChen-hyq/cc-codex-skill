@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -35,11 +37,29 @@ IGNORED_UI_SUBSTRINGS = (
 )
 SCRIPT_DIR = Path(__file__).resolve().parent
 ENSURE_SCRIPT = SCRIPT_DIR / "ensure_claude_tmux.py"
+DEFAULT_TARGET = os.environ.get("CC_COLLAB_DEFAULT_TARGET", "agent_claude:0.0")
+TMUX_COMMAND = (
+    os.environ.get("CC_COLLAB_TMUX_COMMAND")
+    or "tmux"
+).strip() or "tmux"
+
+
+def default_claude_command() -> str:
+    forced = os.environ.get("CC_COLLAB_CLAUDE_TMUX_COMMAND", "").strip()
+    if forced:
+        return forced
+    binary = os.environ.get("CC_COLLAB_CLAUDE_BIN", "claude").strip() or "claude"
+    extra_args = os.environ.get("CC_COLLAB_CLAUDE_EXTRA_ARGS", "--dangerously-skip-permissions").strip()
+    return " ".join(part for part in (shlex.quote(binary), extra_args) if part)
+
+
+def tmux_argv(args: List[str]) -> List[str]:
+    return [*shlex.split(TMUX_COMMAND), *args]
 
 
 def run_tmux(args: List[str], check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["sudo", "-n", "tmux", *args],
+        tmux_argv(args),
         text=True,
         capture_output=True,
         check=check,
@@ -55,7 +75,7 @@ def tmux_load_and_paste(target: str, message: str, clear_prompt_first: bool = Fa
                 raise RuntimeError(proc.stderr.strip() or f"tmux send-keys C-u failed for target={target}")
             time.sleep(0.08)
         proc = subprocess.run(
-            ["sudo", "-n", "tmux", "load-buffer", "-b", buf, "-"],
+            tmux_argv(["load-buffer", "-b", buf, "-"]),
             input=message,
             text=True,
             capture_output=True,
@@ -304,8 +324,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--target",
-        default="agent_claude:0.0",
-        help="tmux target pane, default: agent_claude:0.0",
+        default=DEFAULT_TARGET,
+        help=f"tmux target pane, default: {DEFAULT_TARGET}",
+    )
+    parser.add_argument(
+        "--tmux-command",
+        default=TMUX_COMMAND,
+        help="tmux command prefix. Examples: 'tmux' or 'sudo -u ccuser tmux'.",
     )
     parser.add_argument("--message", required=True, help="Message to send")
     parser.add_argument("--timeout", type=float, default=8.0, help="Seconds to wait per verification attempt")
@@ -328,8 +353,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--cwd",
-        default=str(Path.cwd()),
+        default=os.environ.get("CC_COLLAB_DEFAULT_CWD", str(Path.cwd())).strip(),
         help="Working directory for a newly created Claude tmux session.",
+    )
+    parser.add_argument(
+        "--claude-command",
+        default=default_claude_command(),
+        help="Command to launch if a missing Claude tmux target is created.",
     )
     parser.add_argument(
         "--no-prompt",
@@ -340,7 +370,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def ensure_target(args: argparse.Namespace) -> str:
-    cmd = [sys.executable, str(ENSURE_SCRIPT), "--target", args.target, "--cwd", args.cwd]
+    cmd = [
+        sys.executable,
+        str(ENSURE_SCRIPT),
+        "--target",
+        args.target,
+        "--cwd",
+        args.cwd,
+        "--tmux-command",
+        args.tmux_command,
+        "--claude-command",
+        args.claude_command,
+    ]
     if args.session_name:
         cmd.extend(["--session-name", args.session_name])
     if args.no_prompt:
@@ -353,7 +394,9 @@ def ensure_target(args: argparse.Namespace) -> str:
 
 
 def main() -> int:
+    global TMUX_COMMAND
     args = parse_args()
+    TMUX_COMMAND = args.tmux_command
     try:
         if args.ensure_target:
             args.target = ensure_target(args)

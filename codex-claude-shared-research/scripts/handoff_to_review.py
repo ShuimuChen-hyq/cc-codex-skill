@@ -40,7 +40,7 @@ def main() -> int:
         raise SystemExit(f"Missing shared research doc: {doc_path}")
 
     review_task_id = args.review_task_id or f"{args.task_id}_final_review"
-    summary = args.summary or f"联合调研文档最终复审：{args.task_id}"
+    summary = args.summary or f"Final review for joint research document: {args.task_id}"
 
     proc = subprocess.run(
         [
@@ -74,28 +74,28 @@ def main() -> int:
                 "",
                 "## Context",
                 "",
-                f"- 当前任务：正式复审联合调研文档 `{doc_path.name}`",
-                "- 目标：检查联合调研文档的结构、证据链、结论收敛与残余风险。",
-                "- 本轮范围：以共享文档为唯一事实源，不要求 Claude 另起平行文档。",
+                f"- Current task: formally review joint research document `{doc_path.name}`",
+                "- Goal: check document structure, evidence chain, conclusion convergence, and residual risks.",
+                "- Scope: use the shared document as the only source of truth; do not create a parallel document.",
                 "",
                 "## Code Changes",
                 "",
-                "- 改动文件：联合调研文档本身",
-                "- 关键变更：Codex 已完成最终结论收口，现请求 Claude 做正式复审。",
+                "- Changed files: the joint research document itself",
+                "- Key change: Codex has written the final conclusion and now requests formal Claude review.",
                 "",
                 "## Validation",
                 "",
-                "- 已执行验证：文档已落盘；Claude 已参与 `Claude Research / Claude Summary / Joint Review`。",
-                "- 结果：待 Claude 复审最终结论与整体一致性。",
+                "- Validation performed: document exists on disk; Claude has contributed `Claude Research / Claude Summary / Joint Review`.",
+                "- Result: waiting for Claude to review final conclusion consistency.",
                 "",
                 "## Review Focus",
                 "",
-                "- 请重点检查：证据是否支撑最终结论；是否还有重大遗漏、矛盾或不当收敛。",
-                "- 你认为最可能的回归点：研究结论跨段不一致、开放问题未正确继承。",
+                "- Please focus on whether the evidence supports the final conclusion and whether major gaps or contradictions remain.",
+                "- Most likely regression points: inconsistent conclusions across sections or open questions not carried forward correctly.",
                 "",
                 "## Open Risks",
                 "",
-                "- 如果文档需要修订，请明确指出应改哪一节、为什么改。",
+                "- If the document needs revision, state which section should change and why.",
                 "",
             ]
         )

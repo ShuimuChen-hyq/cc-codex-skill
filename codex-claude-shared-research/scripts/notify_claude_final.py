@@ -7,7 +7,8 @@ import os
 import subprocess
 import sys
 import shlex
-import shutil
+import time
+import uuid
 from pathlib import Path
 
 
@@ -18,16 +19,36 @@ DEFAULT_BASE = Path.cwd() / "joint_research"
 VERIFY_SCRIPT = COLLAB_ROOT / "claude-tmux-submit-verify" / "scripts" / "send_and_verify.py"
 ENSURE_SCRIPT = COLLAB_ROOT / "claude-tmux-submit-verify" / "scripts" / "ensure_claude_tmux.py"
 SESSION_CONFIG_PATH = Path.home() / ".codex_claude_skill_session.json"
+DEFAULT_TARGET = os.environ.get("CC_COLLAB_DEFAULT_TARGET", "agent_claude:0.0")
+
+
+def default_tmux_command() -> str:
+    return os.environ.get("CC_COLLAB_TMUX_COMMAND", "tmux").strip() or "tmux"
 
 
 def default_claude_binary() -> str:
-    forced = os.environ.get("HERMES_COLLAB_CLAUDE_BIN", "").strip()
+    return os.environ.get("CC_COLLAB_CLAUDE_BIN", "claude").strip() or "claude"
+
+
+def default_claude_extra_args() -> str:
+    return os.environ.get("CC_COLLAB_CLAUDE_EXTRA_ARGS", "--dangerously-skip-permissions").strip()
+
+
+def default_claude_user() -> str:
+    return os.environ.get("CC_COLLAB_CLAUDE_USER", "").strip()
+
+
+def default_claude_tmux_command() -> str:
+    forced = os.environ.get("CC_COLLAB_CLAUDE_TMUX_COMMAND", "").strip()
     if forced:
         return forced
-    for candidate in ("claude-csm", "claude"):
-        if shutil.which(candidate):
-            return candidate
-    return "claude"
+    return " ".join(
+        part for part in (shlex.quote(default_claude_binary()), default_claude_extra_args()) if part
+    )
+
+
+def tmux_argv(tmux_command: str, args: list[str]) -> list[str]:
+    return [*shlex.split(tmux_command), *args]
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,8 +56,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-id", required=True, help="Task id / shared research directory name.")
     parser.add_argument(
         "--target",
-        default="agent_claude:0.0",
-        help="tmux target pane, default: agent_claude:0.0",
+        default=DEFAULT_TARGET,
+        help=f"tmux target pane, default: {DEFAULT_TARGET}",
+    )
+    parser.add_argument(
+        "--tmux-command",
+        default=default_tmux_command(),
+        help="tmux command prefix. Examples: 'tmux' or 'sudo -u ccuser tmux'.",
     )
     parser.add_argument(
         "--resume-session",
@@ -46,8 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         choices=("noninteractive", "tmux-first"),
-        default="noninteractive",
-        help="Submission mode. Default: noninteractive",
+        default="tmux-first",
+        help="Submission mode. Default: tmux-first. Use --mode noninteractive to bypass tmux.",
     )
     parser.add_argument("--base-dir", default=str(DEFAULT_BASE), help="Base directory of shared research docs.")
     parser.add_argument("--extra-enter-once", action="store_true", help="Forwarded to send_and_verify.py")
@@ -63,8 +89,28 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--cwd",
-        default=str(Path.cwd()),
+        default=os.environ.get("CC_COLLAB_DEFAULT_CWD", str(Path.cwd())).strip(),
         help="Working directory for a newly created Claude tmux session.",
+    )
+    parser.add_argument(
+        "--claude-command",
+        default=default_claude_tmux_command(),
+        help="Command to launch if a missing Claude tmux target is created.",
+    )
+    parser.add_argument(
+        "--claude-bin",
+        default=default_claude_binary(),
+        help="Claude executable for noninteractive mode.",
+    )
+    parser.add_argument(
+        "--claude-extra-args",
+        default=default_claude_extra_args(),
+        help="Extra Claude args for noninteractive mode.",
+    )
+    parser.add_argument(
+        "--claude-user",
+        default=default_claude_user(),
+        help="Optional OS user for noninteractive Claude. Leave empty to run as the current user.",
     )
     parser.add_argument(
         "--no-prompt",
@@ -79,18 +125,23 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def fallback_noninteractive(resume_session: str, message: str) -> subprocess.CompletedProcess[str]:
+def fallback_noninteractive(
+    resume_session: str,
+    message: str,
+    args: argparse.Namespace,
+) -> subprocess.CompletedProcess[str]:
     parts = [
-        default_claude_binary(),
-        "--dangerously-skip-permissions",
+        args.claude_bin,
+        *shlex.split(args.claude_extra_args),
         "-p",
         "--resume",
         resume_session,
         message,
     ]
-    cmd = " ".join(shlex.quote(part) for part in parts)
+    if args.claude_user:
+        parts = ["sudo", "-u", args.claude_user, "--", *parts]
     return subprocess.run(
-        ["su", "-", "csm", "-c", cmd],
+        parts,
         text=True,
         capture_output=True,
     )
@@ -129,7 +180,18 @@ def resolve_resume_session(args: argparse.Namespace) -> str:
 
 
 def ensure_target(args: argparse.Namespace) -> str:
-    cmd = [sys.executable, str(ENSURE_SCRIPT), "--target", args.target, "--cwd", args.cwd]
+    cmd = [
+        sys.executable,
+        str(ENSURE_SCRIPT),
+        "--target",
+        args.target,
+        "--cwd",
+        args.cwd,
+        "--tmux-command",
+        args.tmux_command,
+        "--claude-command",
+        args.claude_command,
+    ]
     if args.session_name:
         cmd.extend(["--session-name", args.session_name])
     if args.no_prompt:
@@ -139,6 +201,48 @@ def ensure_target(args: argparse.Namespace) -> str:
         raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "ensure_claude_tmux failed")
     payload = json.loads(proc.stdout)
     return payload.get("target") or args.target
+
+
+def send_raw_tmux(target: str, message: str, tmux_command: str) -> None:
+    buf = f"joint-final-{uuid.uuid4().hex[:12]}"
+    try:
+        proc = subprocess.run(
+            tmux_argv(tmux_command, ["send-keys", "-t", target, "C-u"]),
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip() or f"tmux clear-line failed for target={target}")
+        time.sleep(0.08)
+        proc = subprocess.run(
+            tmux_argv(tmux_command, ["load-buffer", "-b", buf, "-"]),
+            input=message,
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip() or f"tmux load-buffer failed for target={target}")
+        proc = subprocess.run(
+            tmux_argv(tmux_command, ["paste-buffer", "-d", "-t", target, "-b", buf]),
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip() or f"tmux paste-buffer failed for target={target}")
+        time.sleep(0.08)
+        proc = subprocess.run(
+            tmux_argv(tmux_command, ["send-keys", "-t", target, "C-m"]),
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip() or f"tmux Enter failed for target={target}")
+    finally:
+        subprocess.run(
+            tmux_argv(tmux_command, ["delete-buffer", "-b", buf]),
+            text=True,
+            capture_output=True,
+        )
 
 
 def main() -> int:
@@ -152,12 +256,12 @@ def main() -> int:
         raise SystemExit(f"Missing verify script: {VERIFY_SCRIPT}")
 
     message = (
-        f"Codex 已经在 {doc_path} 写完 `## Codex Final Conclusion`。"
-        "请读取同一文档的最新版本，确认最终结论已落盘。"
-        "如无新的阻塞问题，请在 pane 回复一句 FINAL_CONCLUSION_ACK。"
+        f"Codex has written `## Codex Final Conclusion` in {doc_path}. "
+        "Please read the latest version of the same document and confirm the final conclusion is persisted. "
+        "If there is no new blocking issue, reply in the pane with FINAL_CONCLUSION_ACK."
     )
     if args.mode == "noninteractive":
-        proc = fallback_noninteractive(resume_session, message)
+        proc = fallback_noninteractive(resume_session, message, args)
         result = {
             "submitted": proc.returncode == 0,
             "working_confirmed": proc.returncode == 0,
@@ -175,7 +279,37 @@ def main() -> int:
     if args.ensure_target or args.mode == "tmux-first":
         args.target = ensure_target(args)
 
-    cmd = [sys.executable, str(VERIFY_SCRIPT), "--target", args.target, "--message", message]
+    try:
+        send_raw_tmux(args.target, f"/resume {resume_session}".strip(), args.tmux_command)
+        time.sleep(1.0)
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "submitted": False,
+                    "working_confirmed": False,
+                    "mode": "tmux-first",
+                    "target": args.target,
+                    "resume_session": resume_session,
+                    "reason": "resume_failed",
+                    "error": str(exc),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 1
+
+    cmd = [
+        sys.executable,
+        str(VERIFY_SCRIPT),
+        "--target",
+        args.target,
+        "--tmux-command",
+        args.tmux_command,
+        "--message",
+        message,
+    ]
     if args.extra_enter_once:
         cmd.append("--extra-enter-once")
 

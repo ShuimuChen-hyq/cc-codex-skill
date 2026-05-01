@@ -61,18 +61,94 @@ Expected output:
 - Codex can read `~/.codex/skills`.
 - `tmux` is installed.
 - Claude Code is already running in a `tmux` pane.
-- The default pane is `agent_claude:0.0`.
-- Helper scripts use `sudo -n tmux` by default. Make sure the runtime user can run that command without an interactive password prompt, or adapt the scripts for your environment.
+- The default pane convention is `agent_claude:0.0`.
+- The helper scripts default to plain `tmux`. If Codex and Claude run under different OS users, configure the tmux command explicitly.
 
-## Typical Setup
+## Setup Option A: Same Normal User
 
-Start or attach to the Claude pane before asking Codex to use these skills:
+Use this when Codex and Claude run as the same non-root user. Start or attach to the Claude pane before asking Codex to use these skills:
 
 ```bash
 tmux new -s agent_claude
 ```
 
-Inside that pane, start Claude Code. If your pane target is different, pass `--target` to the helper scripts or update the defaults in the skill scripts.
+Inside that pane, start Claude Code with the permissions you want:
+
+```bash
+claude --dangerously-skip-permissions
+```
+
+The default target is then:
+
+```text
+agent_claude:0.0
+```
+
+## Setup Option B: Codex Runs As Root
+
+Claude Code should usually run as a normal OS user, not as root. If Codex runs as root, create or choose a normal user, start Claude in that user's tmux session, then let root control that user's tmux with a configured command.
+
+Example:
+
+```bash
+useradd -m ccuser
+sudo -iu ccuser
+tmux new -s agent_claude
+claude --dangerously-skip-permissions
+```
+
+In the root shell where Codex runs:
+
+```bash
+export CC_COLLAB_TMUX_COMMAND='sudo -u ccuser tmux'
+export CC_COLLAB_CLAUDE_USER='ccuser'
+```
+
+If `claude` is not on the non-root user's non-login PATH, set the full executable path:
+
+```bash
+export CC_COLLAB_CLAUDE_BIN='/home/ccuser/.local/bin/claude'
+```
+
+Do not hard-code a machine-specific user. The user name, tmux target, and Claude executable are deployment-specific.
+
+## Configuration
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `CC_COLLAB_TMUX_COMMAND` | `tmux` | Command prefix used for all tmux operations. Use `sudo -u <user> tmux` when Codex controls another user's tmux. |
+| `CC_COLLAB_DEFAULT_TARGET` | `agent_claude:0.0` | Default Claude pane target. |
+| `CC_COLLAB_DEFAULT_CWD` | current directory | Working directory for newly created Claude tmux sessions. |
+| `CC_COLLAB_CLAUDE_TMUX_COMMAND` | `claude --dangerously-skip-permissions` | Command launched inside a newly created Claude tmux session. |
+| `CC_COLLAB_CLAUDE_BIN` | `claude` | Claude executable for noninteractive mode or fallback. |
+| `CC_COLLAB_CLAUDE_EXTRA_ARGS` | `--dangerously-skip-permissions` | Extra Claude args for noninteractive mode or fallback. |
+| `CC_COLLAB_CLAUDE_USER` | empty | Optional OS user for noninteractive Claude. Empty means current user. |
+
+Every helper also exposes matching CLI flags such as `--target`, `--tmux-command`, `--claude-bin`, `--claude-user`, and `--claude-command`.
+
+## Default Submission Mode
+
+Review and shared-research helpers now default to interactive `tmux` submission:
+
+```text
+--mode tmux-first
+```
+
+This applies to:
+
+- `claude-review-loop/scripts/send_review_request.py`
+- `codex-claude-shared-research/scripts/send_joint_research_request.py`
+- `codex-claude-shared-research/scripts/notify_claude_final.py`
+
+In this mode, the helper sends the request to `agent_claude:0.0` through `tmux` and uses `claude-tmux-submit-verify` to confirm Claude actually entered a working state. If your Claude pane is different, pass `--target <session:window.pane>`.
+
+Helpers that need Claude context first send `/resume <configured-session>`. Configure that once with `--resume-session <name> --persist-session`, or pass `--resume-session <name>` per run.
+
+To explicitly bypass `tmux`, pass:
+
+```bash
+--mode noninteractive
+```
 
 ## Skill Usage
 
@@ -162,7 +238,7 @@ python3 ~/.codex/skills/codex-claude-shared-research/scripts/notify_claude_final
 Default shared research path:
 
 ```text
-/data/shuimu.chen/agent_i/joint_research/<task_id>/JOINT_RESEARCH.md
+joint_research/<task_id>/JOINT_RESEARCH.md
 ```
 
 Adjust paths in the scripts or pass script arguments if your environment uses a different workspace layout.

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
 
 DEFAULT_BASE = Path.cwd() / "joint_research"
+DEFAULT_TARGET = os.environ.get("CC_COLLAB_DEFAULT_TARGET", "agent_claude:0.0")
 SESSION_CONFIG_PATH = Path.home() / ".codex_claude_skill_session.json"
 
 
@@ -22,8 +24,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-id", required=True, help="Stable task id, used as directory name.")
     parser.add_argument("--summary", default="", help="Short task summary.")
     parser.add_argument("--base-dir", default=str(DEFAULT_BASE), help="Base output directory.")
-    parser.add_argument("--claude-target", default="agent_claude:0.0", help="Preferred Claude tmux target.")
-    parser.add_argument("--resume-session", default="", help="Claude session name to reuse for noninteractive handoff.")
+    parser.add_argument("--claude-target", default=DEFAULT_TARGET, help="Preferred Claude tmux target.")
+    parser.add_argument("--resume-session", default="", help="Claude session name to resume before Claude handoff.")
     return parser.parse_args()
 
 
