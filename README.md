@@ -1,14 +1,22 @@
 # Codex CC Collaboration Skills
 
-Codex skills for collaborating with a Claude Code session through tmux.
+<p align="center">
+  <img src="assets/codex-claude-collab-banner.png" alt="Codex and Claude collaboration workflow" width="100%">
+</p>
 
-This repository contains three skills:
+A compact Codex skill pack for turning a Claude Code session in `tmux` into a verifiable coding, review, and research collaborator.
 
-- `claude-tmux-submit-verify`: send a message to a Claude tmux pane and verify that Claude actually started working.
-- `claude-review-loop`: create a file-based review packet, send it to Claude, and require Claude to write review results back to disk.
-- `codex-claude-shared-research`: coordinate Codex and Claude around one shared Markdown research document.
+The core idea is simple: Codex should not rely on a terminal transcript as the source of truth. Requests, review findings, and shared research are written to files, so the handoff can be checked, resumed, and audited.
 
-The skills assume a Claude session is running in tmux, usually at:
+## What Is Included
+
+| Skill | Use it for | Core guarantee |
+| --- | --- | --- |
+| `claude-tmux-submit-verify` | Send a message to Claude through `tmux`. | Verifies that Claude actually started working after `send-keys`. |
+| `claude-review-loop` | Ask Claude to review a completed code change. | Forces findings to be written to `RESPONSE.md` before Codex proceeds. |
+| `codex-claude-shared-research` | Let Codex and Claude jointly investigate one topic. | Keeps both agents' notes and the final conclusion in one Markdown file. |
+
+The default Claude pane is:
 
 ```text
 agent_claude:0.0
@@ -16,12 +24,16 @@ agent_claude:0.0
 
 ## Install
 
+Clone the repository:
+
+```bash
+git clone https://github.com/ShuimuChen-hyq/cc-codex-skill.git
+cd cc-codex-skill
+```
+
 Install all skills into the Codex user skill directory:
 
 ```bash
-git clone https://github.com/ShuimuChen-hyq/codex-cc-collab-skills.git
-cd codex-cc-collab-skills
-
 mkdir -p ~/.codex/skills
 cp -a claude-tmux-submit-verify ~/.codex/skills/
 cp -a claude-review-loop ~/.codex/skills/
@@ -30,13 +42,13 @@ cp -a codex-claude-shared-research ~/.codex/skills/
 
 Restart Codex after installing. Skills are loaded at session start.
 
-To verify installation:
+Verify installation:
 
 ```bash
 find ~/.codex/skills -maxdepth 2 -name SKILL.md -print
 ```
 
-You should see:
+Expected output:
 
 ```text
 ~/.codex/skills/claude-tmux-submit-verify/SKILL.md
@@ -46,19 +58,29 @@ You should see:
 
 ## Requirements
 
-- Codex must be able to read `~/.codex/skills`.
-- `tmux` must be installed.
-- A Claude session should be running in a tmux pane.
+- Codex can read `~/.codex/skills`.
+- `tmux` is installed.
+- Claude Code is already running in a `tmux` pane.
 - The default pane is `agent_claude:0.0`.
-- The helper scripts use `sudo -n tmux` by default. Make sure the runtime user can run that command without an interactive password prompt, or adapt the scripts for your environment.
+- Helper scripts use `sudo -n tmux` by default. Make sure the runtime user can run that command without an interactive password prompt, or adapt the scripts for your environment.
+
+## Typical Setup
+
+Start or attach to the Claude pane before asking Codex to use these skills:
+
+```bash
+tmux new -s agent_claude
+```
+
+Inside that pane, start Claude Code. If your pane target is different, pass `--target` to the helper scripts or update the defaults in the skill scripts.
 
 ## Skill Usage
 
 ### `claude-tmux-submit-verify`
 
-Use this when Codex needs to send a request to Claude through tmux and must verify that the message was really submitted.
+Use this when Codex needs to send a request to Claude through `tmux` and must verify that the message was really submitted.
 
-This skill prevents a common failure mode: `tmux send-keys` only leaves text at Claude's prompt, but Claude never starts processing it.
+This prevents a common failure mode: `tmux send-keys` leaves text at Claude's prompt, but Claude never starts processing it.
 
 Example direct helper usage:
 
@@ -78,7 +100,7 @@ The workflow is:
 
 1. Create a review packet with `REQUEST.md` and `RESPONSE.md`.
 2. Codex writes the task, changed files, tests, and review focus into `REQUEST.md`.
-3. Codex sends Claude a tmux request.
+3. Codex sends Claude a verified `tmux` request.
 4. Claude writes findings into `RESPONSE.md`.
 5. Codex reads the response and either fixes issues or closes the task.
 
@@ -149,6 +171,8 @@ Adjust paths in the scripts or pass script arguments if your environment uses a 
 
 ```text
 .
+├── assets/
+│   └── codex-claude-collab-banner.png
 ├── claude-review-loop/
 │   ├── SKILL.md
 │   └── scripts/
@@ -164,5 +188,5 @@ Adjust paths in the scripts or pass script arguments if your environment uses a 
 ## Notes
 
 - These skills are workflow constraints. They do not guarantee Claude's review quality.
-- The important invariant is that review and research results are written to files, not only discussed in a tmux pane.
+- The important invariant is that review and research results are written to files, not only discussed in a `tmux` pane.
 - Restart Codex after installation or updates.
